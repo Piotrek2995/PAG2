@@ -1,3 +1,4 @@
 # PAG2
 
-Projekt Piotr Pawlus, Bartosz Ziółkowski, Szymon Ziędalski
+Projekt1
+Piotr Pawlus, Bartosz Ziółkowski, Szymon Ziędalski
