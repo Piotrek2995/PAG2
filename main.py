@@ -1,6 +1,34 @@
-#import math
-#import arcpy
+import math
+import arcpy
+import os
+import graphlib
 
-class Data:
-    def __init__(self, data):
-        self.data = data
+from collections import defaultdict
+
+def read_graph_dir(filename):
+    """Wczytuje graf skierowany z pliku."""
+    graph = defaultdict(list)
+    with open(filename, "r") as f:
+        for line in f:
+            u, v = line.split()
+            graph[u].append(v)
+    return graph
+
+def read_graph_undir(filename):
+    """Wczytuje graf nieskierowany z pliku."""
+    graph = defaultdict(list)
+    with open(filename, "r") as f:
+        for line in f:
+            u, v = line.split()
+            graph[u].append(v)
+            graph[v].append(u)
+    return graph
+
+# Użycie
+graph_directed = read_graph_dir("graph1.txt")
+print(graph_directed)
+
+graph_undirected = read_graph_undir("graph2.txt")
+print(graph_undirected)
+
+print(read_graph_undir("graph3.txt"))
