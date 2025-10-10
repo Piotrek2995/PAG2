@@ -1,11 +1,8 @@
 import math
-from urllib.parse import uses_query
-
 import arcpy
 import os
 import graphlib
 from collections import defaultdict
-
 
 # Najlepsza implementacja grafu skierowanego to slownik list
 from collections import defaultdict
