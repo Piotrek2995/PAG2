@@ -2,11 +2,14 @@ import math
 import arcpy
 import os
 import graphlib
+from collections import defaultdict
 
+
+# Najlepsza implementacja grafu skierowanego to slownik list
 from collections import defaultdict
 
 def read_graph_dir(filename):
-    """Wczytuje graf skierowany z pliku."""
+    # Wczytuje graf skierowany z pliku.
     graph = defaultdict(list)
     with open(filename, "r") as f:
         for line in f:
@@ -15,7 +18,7 @@ def read_graph_dir(filename):
     return graph
 
 def read_graph_undir(filename):
-    """Wczytuje graf nieskierowany z pliku."""
+    # Wczytuje graf nieskierowany z pliku.
     graph = defaultdict(list)
     with open(filename, "r") as f:
         for line in f:
@@ -25,10 +28,15 @@ def read_graph_undir(filename):
     return graph
 
 # Użycie
-graph_directed = read_graph_dir("graph1.txt")
-print(graph_directed)
 
-graph_undirected = read_graph_undir("graph2.txt")
-print(graph_undirected)
+print(read_graph_dir("graph1.txt"))
 
-print(read_graph_undir("graph3.txt"))
+print(read_graph_undir("graph2.txt"))
+
+
+# liczba = int(input("Ile razy wyświetlić żart? "))
+# for i in range(liczba):
+#     print(f"{i+1}. Dlaczego programista nie może znaleźć żony? Bo szuka wśród zer i jedynek!")
+
+# graf wszerz BFS
+
