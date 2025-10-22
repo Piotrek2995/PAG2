@@ -3,6 +3,7 @@ from heapq import heappush, heappop
 from collections import defaultdict
 from typing import Dict, List, Tuple, Set, Optional
 
+
 # Konfiguracja
 arcpy.env.workspace = r"C:\Users\cp24\Documents\temp\MyProject2\MyProject2.gdb" #tu zmien!!!
 FC_ROADS = "skjzl" #tu tez zmien!!!
