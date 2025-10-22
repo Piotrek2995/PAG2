@@ -3,7 +3,6 @@ from heapq import heappush, heappop
 from collections import defaultdict
 from typing import Dict, List, Tuple, Set, Optional
 
-
 # Konfiguracja
 arcpy.env.workspace = r"C:\Users\cp24\Documents\temp\MyProject2\MyProject2.gdb" #tu zmien!!!
 FC_ROADS = "skjzl" #tu tez zmien!!!
@@ -111,7 +110,7 @@ def dijkstra(start_vertex_id: int, end_vertex_id: int) -> List[int]:
     nodes, eids = reconstruct_path(pred, edge_to_vertex, start_vertex_id, end_vertex_id)
     print("[Dijkstra] nodes:", " -> ".join(map(str, nodes)))
     print("[Dijkstra] length [m]:", dist[end_vertex_id])
-    print("[Dijkstra] |S|:", len(visited), "neighbors checked:", neighbors_checked)
+    print("[Dijkstra] |S|:", len(visited), "|| neighbors checked:", neighbors_checked)
     return eids
 
 if __name__ == "__main__":
