@@ -1,9 +1,11 @@
 import arcpy
-from typing import Dict, Tuple, Optional
+from heapq import heappush, heappop
+from collections import defaultdict
+from typing import Dict, List, Tuple, Set, Optional
 
 # Konfiguracja
-arcpy.env.workspace = r"C:\Users\piotr\Documents\ArcGIS\Projects\Projekt1_PAG2\Projekt1_PAG2.gdb"
-FC_ROADS = "skjzPAG2"
+arcpy.env.workspace = r"C:\Users\cp24\Documents\temp\MyProject2\MyProject2.gdb" #tu zmien!!!
+FC_ROADS = "skjzl" #tu tez zmien!!!
 WHERE = None
 
 FIELD_SHAPE = "SHAPE@"
@@ -68,6 +70,50 @@ def build_graph_from_fc(fc: str, where_clause: Optional[str] = WHERE) -> Tuple[i
             else: add_edge(u, v); add_edge(v, u)
     return len(vertices), len(edges)
 
+# Kierunek (jesli bedzie potrzebne)
+def czy_dobry_kierunek(direction: int, id_from: int, id_to: int, current_vertex_id: int) -> bool:
+    if direction == 3: return False
+    if direction == 1: return current_vertex_id == id_from
+    if direction == 2: return current_vertex_id == id_to
+    return True
+#rekonstrukcja sciezki
+def reconstruct_path(predecessors, edge_to_vertex, start, goal):
+    path_nodes, path_edges, cur = [], [], goal
+    while cur is not None:
+        path_nodes.append(cur)
+        if cur in edge_to_vertex: path_edges.append(edge_to_vertex[cur])
+        cur = predecessors[cur]
+    path_nodes.reverse(); path_edges.reverse()
+    if not path_nodes or path_nodes[0] != start: return [], []
+    return path_nodes, path_edges
+
+# Algorytm Dijkstry
+def dijkstra(start_vertex_id: int, end_vertex_id: int) -> List[int]:
+    INF = float("inf")
+    dist, pred = defaultdict(lambda: INF), defaultdict(lambda: None)
+    visited: Set[int] = set(); edge_to_vertex = {}; neighbors_checked = 0
+    dist[start_vertex_id] = 0.0; pq = [(0.0, start_vertex_id)]
+    while pq:
+        cur_d, u = heappop(pq)
+        if u in visited: continue
+        visited.add(u)
+        if u == end_vertex_id: break
+        for eid in vertices[u]["edge_out"]:
+            e = edges[eid]; v = e["id_to"]; neighbors_checked += 1
+            if not czy_dobry_kierunek(e["kier_auto"], e["id_from"], e["id_to"], u): continue
+            if v in visited: continue
+            nd = cur_d + e["edge_length_field"]
+            if nd < dist[v]:
+                dist[v] = nd; pred[v] = u; edge_to_vertex[v] = e["id"]; heappush(pq, (nd, v))
+    if dist[end_vertex_id] == INF:
+        print("No path found."); return []
+    nodes, eids = reconstruct_path(pred, edge_to_vertex, start_vertex_id, end_vertex_id)
+    print("[Dijkstra] nodes:", " -> ".join(map(str, nodes)))
+    print("[Dijkstra] length [m]:", dist[end_vertex_id])
+    print("[Dijkstra] |S|:", len(visited), "neighbors checked:", neighbors_checked)
+    return eids
+
 if __name__ == "__main__":
-    nV, nE = build_graph_from_fc(FC_ROADS, where_clause=WHERE)
+    nV, nE = build_graph_from_fc(FC_ROADS)
     print(f"Graph built: |V|={nV}, |E|={nE}")
+    dijkstra(1, nV)
