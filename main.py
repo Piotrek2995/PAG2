@@ -2,10 +2,11 @@ import arcpy
 from heapq import heappush, heappop
 from collections import defaultdict
 from typing import Dict, List, Tuple, Set, Optional
+import math
 
 # Konfiguracja
-arcpy.env.workspace = r"C:\Users\piotr\Documents\ArcGIS\Projects\Projekt1_PAG2\Projekt1_PAG2.gdb" #tu zmien!!!
-FC_ROADS = "skjzPAG2" #tu tez zmien!!!
+arcpy.env.workspace = r"C:\Users\szymo\OneDrive\Dokumenty\ArcGIS\Projects\PAG1\PAG1.gdb" # ustawić własną ścieżkę
+FC_ROADS = "skjz_kopia" #ustawić własną ścieżkę
 WHERE = None
 
 FIELD_OID   = "OBJECTID"
@@ -31,6 +32,12 @@ def _map_klasa_bdot(klasa_txt: Optional[str]) -> str:
     if "dojaz" in s:     return "D"
     if "inna" in s or "wewn" in s: return "I"
     return "G"
+
+# Heurestyka euklidesowa - szukanie jak daleko zostało do celu (odległóść euklidesowa)
+def _euclid(v1: int, v2: int) -> float:
+    dx = vertices[v1]["x"] - vertices[v2]["x"]
+    dy = vertices[v1]["y"] - vertices[v2]["y"]
+    return math.hypot(dx, dy)
 
 # Funkcja do zaokrąglania współrzędnych wierzchołków
 def _snap_key(x: float, y: float, tol: float) -> Tuple[int, int]:
@@ -162,6 +169,50 @@ def dijkstra(start_vertex_id: int, end_vertex_id: int) -> List[int]:
     print("[Dijkstra] |S|:", len(visited), "|| neighbors checked:", neighbors_checked)
     return eids
 
+# Algorytm A* (długość)
+def a_star_length(start_vertex_id: int, end_vertex_id: int) -> List[int]:
+    INF = float("inf")
+    g = defaultdict(lambda: INF)
+    pred = defaultdict(lambda: None)
+    visited: Set[int] = set()
+    neighbors_checked = 0
+    edge_to_vertex: Dict[int, int] = {}
+
+    g[start_vertex_id] = 0.0
+    pq_len: List[Tuple[float, int]] = []
+    heappush(pq_len, (_euclid(start_vertex_id, end_vertex_id), start_vertex_id))
+
+    while pq_len:
+        _, u = heappop(pq_len)
+        if u in visited: continue
+        visited.add(u)
+        if u == end_vertex_id: break
+
+        gu = g[u]
+        for eid in vertices[u]["edge_out"]:
+            e = edges[eid]
+            v = e["id_to"]
+            neighbors_checked += 1
+            if not czy_dobry_kierunek(e["kier_auto"], e["id_from"], e["id_to"], u):
+                continue
+            if v in visited: continue
+            tentative = gu + e["edge_length_field"]
+            if tentative < g[v]:
+                g[v] = tentative
+                pred[v] = u
+                edge_to_vertex[v] = e["id"]
+                f = tentative + _euclid(v, end_vertex_id)
+                heappush(pq_len, (f, v))
+
+    if g[end_vertex_id] == INF:
+        print("No path found.")
+        return []
+
+    nodes, eids = reconstruct_path(pred, edge_to_vertex, start_vertex_id, end_vertex_id)
+    print("[A* length] nodes:", " -> ".join(map(str, nodes)))
+    print("[A* length] length [m]:", g[end_vertex_id])
+    print("[A* length] |S|:", len(visited), " neighbors checked:", neighbors_checked)
+    return eids
 
 def export_graph_to_gdb(gdb_path: str, nodes_name: str = "nodes_out", edges_name: str = "edges_out"):
 
@@ -222,3 +273,4 @@ if __name__ == "__main__":
     export_graph_to_gdb(arcpy.env.workspace)
 
     dijkstra(1, nV)
+    a_star_length(1, nV)
