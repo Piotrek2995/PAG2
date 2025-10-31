@@ -4,21 +4,24 @@ from collections import defaultdict
 from typing import Dict, List, Tuple, Set, Optional
 import math
 
-# Konfiguracja
-arcpy.env.workspace = r"C:\Users\szymo\OneDrive\Dokumenty\ArcGIS\Projects\PAG1\PAG1.gdb" # ustawić własną ścieżkę
-FC_ROADS = "skjz_kopia" #ustawić własną ścieżkę
+# ─── Konfiguracja ──────────────────────────────────────────────────────────────
+arcpy.env.workspace = r"C:\Users\piotr\Documents\ArcGIS\Projects\Projekt1_PAG2\Projekt1_PAG2.gdb"  # ustaw własną ścieżkę
+FC_ROADS = "skjzPAG2"   # ustaw własną warstwę
 WHERE = None
 
-FIELD_OID   = "OBJECTID"
-FIELD_SHAPE = "SHAPE@"
-FIELD_CLASS = "KLASA_DROG"
+FIELD_OID    = "OBJECTID"
+FIELD_SHAPE  = "SHAPE@"
+FIELD_CLASS  = "KLASA_DROG"
 FIELD_DIR_OPT = "kierunkowosc"
 
-# Model grafu
+# Domyślne prędkości (km/h) dla A* po czasie
+SPEED_KPH = {"A":140, "S":120, "GP":90, "G":50, "Z":50, "L":50, "D":30, "I":10}
+
+# ─── Model grafu ───────────────────────────────────────────────────────────────
 vertices: Dict[int, Dict] = {}
 edges: Dict[int, Dict] = {}
 
-# Funkcje pomocnicze
+# ─── Funkcje pomocnicze ───────────────────────────────────────────────────────
 def _map_klasa_bdot(klasa_txt: Optional[str]) -> str:
     if not klasa_txt:
         return "G"
@@ -33,28 +36,30 @@ def _map_klasa_bdot(klasa_txt: Optional[str]) -> str:
     if "inna" in s or "wewn" in s: return "I"
     return "G"
 
-# Heurestyka euklidesowa - szukanie jak daleko zostało do celu (odległóść euklidesowa)
 def _euclid(v1: int, v2: int) -> float:
     dx = vertices[v1]["x"] - vertices[v2]["x"]
     dy = vertices[v1]["y"] - vertices[v2]["y"]
     return math.hypot(dx, dy)
 
-# Funkcja do zaokrąglania współrzędnych wierzchołków
 def _snap_key(x: float, y: float, tol: float) -> Tuple[int, int]:
     return (round(x / tol), round(y / tol))
 
-# Budowa grafu
+def _mps(kph: float) -> float:
+    return kph * 1000.0 / 3600.0
+
+VMAX_MPS = _mps(max(SPEED_KPH.values()))
+
+# ─── Budowa grafu ──────────────────────────────────────────────────────────────
 def build_graph_from_fc(
     fc: str,
     where_clause: Optional[str] = WHERE,
-    snap_tol: float = 0.25  #  tolerancja 0.25 metra
+    snap_tol: float = 0.25  # tolerancja 0.25 m
 ) -> Tuple[int, int]:
 
-    vertex_ids_by_snap: Dict[Tuple[int, int], int] = {}  # klucz = (_snap_key), wartość = id węzła
+    vertex_ids_by_snap: Dict[Tuple[int, int], int] = {}
     next_vid = 1
     next_eid = 1
 
-    # sprawdź, czy pole kierunkowosc istnieje
     fld_names_lower = {f.name.lower() for f in arcpy.ListFields(fc)}
     has_dir = FIELD_DIR_OPT.lower() in fld_names_lower
 
@@ -62,7 +67,7 @@ def build_graph_from_fc(
 
     with arcpy.da.SearchCursor(fc, fields, where_clause=where_clause) as cur:
         for row in cur:
-            jezdnia_oid = int(row[0])   # <-- ID jezdni z warstwy
+            jezdnia_oid = int(row[0])
             geom        = row[1]
             klasa_txt   = row[2]
             kier        = row[3] if has_dir else 0
@@ -80,7 +85,7 @@ def build_graph_from_fc(
             klasa_code = _map_klasa_bdot(klasa_txt)
             kier = int(kier) if kier is not None else 0
 
-            # --- węzły z kwantyzacją (snap do siatki tol)
+            # węzły z kwantyzacją
             k1 = _snap_key(x1, y1, snap_tol)
             k2 = _snap_key(x2, y2, snap_tol)
 
@@ -105,12 +110,11 @@ def build_graph_from_fc(
                     "edge_length_field": length_m,
                     "kier_auto": kier,
                     "klasa_drogi": klasa_code,
-                    "jezdnia_oid": jezdnia_oid,   # <-- przeniesione ID jezdni do krawędzi
+                    "jezdnia_oid": jezdnia_oid,
                 }
                 vertices[u_id]["edge_out"].append(next_eid)
                 next_eid += 1
 
-            # kierunki przejezdności
             if kier == 3:
                 continue
             elif kier == 0:
@@ -126,13 +130,14 @@ def build_graph_from_fc(
 
     return len(vertices), len(edges)
 
-# Kierunek (jesli bedzie potrzebne)
+# ─── Kierunek (bezpiecznik) ───────────────────────────────────────────────────
 def czy_dobry_kierunek(direction: int, id_from: int, id_to: int, current_vertex_id: int) -> bool:
     if direction == 3: return False
     if direction == 1: return current_vertex_id == id_from
     if direction == 2: return current_vertex_id == id_to
     return True
-#rekonstrukcja sciezki
+
+# ─── Rekonstrukcja ścieżki ────────────────────────────────────────────────────
 def reconstruct_path(predecessors, edge_to_vertex, start, goal):
     path_nodes, path_edges, cur = [], [], goal
     while cur is not None:
@@ -143,7 +148,7 @@ def reconstruct_path(predecessors, edge_to_vertex, start, goal):
     if not path_nodes or path_nodes[0] != start: return [], []
     return path_nodes, path_edges
 
-# Algorytm Dijkstry
+# ─── Dijkstra (po długości) ───────────────────────────────────────────────────
 def dijkstra(start_vertex_id: int, end_vertex_id: int) -> List[int]:
     INF = float("inf")
     dist, pred = defaultdict(lambda: INF), defaultdict(lambda: None)
@@ -169,7 +174,7 @@ def dijkstra(start_vertex_id: int, end_vertex_id: int) -> List[int]:
     print("[Dijkstra] |S|:", len(visited), "|| neighbors checked:", neighbors_checked)
     return eids
 
-# Algorytm A* (długość)
+# ─── A* (po długości) ─────────────────────────────────────────────────────────
 def a_star_length(start_vertex_id: int, end_vertex_id: int) -> List[int]:
     INF = float("inf")
     g = defaultdict(lambda: INF)
@@ -214,18 +219,76 @@ def a_star_length(start_vertex_id: int, end_vertex_id: int) -> List[int]:
     print("[A* length] |S|:", len(visited), " neighbors checked:", neighbors_checked)
     return eids
 
-def export_graph_to_gdb(gdb_path: str, nodes_name: str = "nodes_out", edges_name: str = "edges_out"):
+# ─── A* (po prędkości/czasie) ────────────────────────────────────────────────
+def a_star_speed(start_vertex_id: int, end_vertex_id: int) -> List[int]:
+    """
+    Minimalizuje czas przejazdu: cost(edge) = length / speed(klasa_drogi).
+    Heurystyka: Euclid / VMAX_MPS (admissible i consistent) => zachowuje optymalność.
+    """
+    INF = float("inf")
+    g_time = defaultdict(lambda: INF)   # sekundy
+    pred = defaultdict(lambda: None)
+    visited: Set[int] = set()
+    neighbors_checked = 0
+    edge_to_vertex: Dict[int, int] = {}
 
+    g_time[start_vertex_id] = 0.0
+    pq: List[Tuple[float, int]] = []
+    heappush(pq, (_euclid(start_vertex_id, end_vertex_id) / VMAX_MPS, start_vertex_id))
+
+    while pq:
+        _, u = heappop(pq)
+        if u in visited: continue
+        visited.add(u)
+        if u == end_vertex_id: break
+
+        gu = g_time[u]
+        for eid in vertices[u]["edge_out"]:
+            e = edges[eid]
+            v = e["id_to"]
+            neighbors_checked += 1
+            if not czy_dobry_kierunek(e["kier_auto"], e["id_from"], e["id_to"], u):
+                continue
+            if v in visited: continue
+
+            # czas na krawędzi
+            cls = e.get("klasa_drogi", "G")
+            v_mps = _mps(SPEED_KPH.get(cls, SPEED_KPH["G"]))
+            if v_mps <= 0:
+                continue
+            travel = e["edge_length_field"] / v_mps  # sekundy
+
+            tentative = gu + travel
+            if tentative < g_time[v]:
+                g_time[v] = tentative
+                pred[v] = u
+                edge_to_vertex[v] = e["id"]
+                h = _euclid(v, end_vertex_id) / VMAX_MPS
+                f = tentative + h
+                heappush(pq, (f, v))
+
+    if g_time[end_vertex_id] == INF:
+        print("No path found.")
+        return []
+
+    nodes, eids = reconstruct_path(pred, edge_to_vertex, start_vertex_id, end_vertex_id)
+    total_len = sum(edges[eid]["edge_length_field"] for eid in eids)
+    print("[A* speed] nodes:", " -> ".join(map(str, nodes)))
+    print("[A* speed] time [s]:", g_time[end_vertex_id])
+    print("[A* speed] length [m]:", total_len)
+    print("[A* speed] |S|:", len(visited), " neighbors checked:", neighbors_checked)
+    return eids
+
+# ─── Eksport grafu do GDB ─────────────────────────────────────────────────────
+def export_graph_to_gdb(gdb_path: str, nodes_name: str = "nodes_out", edges_name: str = "edges_out"):
     sr = arcpy.Describe(FC_ROADS).spatialReference
     nodes_fc = f"{gdb_path}\\{nodes_name}"
     edges_fc = f"{gdb_path}\\{edges_name}"
 
-    # Usuwa stare
     for fc in [nodes_fc, edges_fc]:
         if arcpy.Exists(fc):
             arcpy.management.Delete(fc)
 
-    #Punkty (węzły)
     arcpy.management.CreateFeatureclass(gdb_path, nodes_name, "POINT", spatial_reference=sr)
     arcpy.management.AddField(nodes_fc, "node_id", "LONG")
     with arcpy.da.InsertCursor(nodes_fc, ["SHAPE@XY", "node_id"]) as icur:
@@ -233,44 +296,36 @@ def export_graph_to_gdb(gdb_path: str, nodes_name: str = "nodes_out", edges_name
             icur.insertRow(((v["x"], v["y"]), vid))
     print(f"[EXPORT] Zapisano {len(vertices)} węzłów do {nodes_fc}")
 
-    #Linie (krawędzie)
     arcpy.management.CreateFeatureclass(gdb_path, edges_name, "POLYLINE", spatial_reference=sr)
-
-    # atrybuty
     arcpy.management.AddField(edges_fc, "edge_id",     "LONG")
     arcpy.management.AddField(edges_fc, "id_from",     "LONG")
     arcpy.management.AddField(edges_fc, "id_to",       "LONG")
     arcpy.management.AddField(edges_fc, "length_m",    "DOUBLE")
     arcpy.management.AddField(edges_fc, "klasa",       "TEXT")
     arcpy.management.AddField(edges_fc, "kier",        "SHORT")
-    arcpy.management.AddField(edges_fc, "jezdnia_oid", "LONG")  # <<<<<< DODANE
+    arcpy.management.AddField(edges_fc, "jezdnia_oid", "LONG")
 
     with arcpy.da.InsertCursor(
         edges_fc,
-        ["SHAPE@", "edge_id", "id_from", "id_to", "length_m", "klasa", "kier", "jezdnia_oid"]  # <<<<<< DODANE
+        ["SHAPE@", "edge_id", "id_from", "id_to", "length_m", "klasa", "kier", "jezdnia_oid"]
     ) as icur:
         for eid, e in edges.items():
-            u = vertices[e["id_from"]]
-            v = vertices[e["id_to"]]
+            u = vertices[e["id_from"]]; v = vertices[e["id_to"]]
             arr = arcpy.Array([arcpy.Point(u["x"], u["y"]), arcpy.Point(v["x"], v["y"])])
             poly = arcpy.Polyline(arr, sr)
             icur.insertRow((
-                poly,
-                eid,
-                e["id_from"],
-                e["id_to"],
-                e["edge_length_field"],
-                e["klasa_drogi"],
-                e["kier_auto"],
-                e.get("jezdnia_oid", None)  # <<<<<< DODANE
+                poly, eid, e["id_from"], e["id_to"],
+                e["edge_length_field"], e["klasa_drogi"], e["kier_auto"], e.get("jezdnia_oid", None)
             ))
     print(f"[EXPORT] Zapisano {len(edges)} krawędzi do {edges_fc}")
 
-
+# ─── main ─────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     nV, nE = build_graph_from_fc(FC_ROADS, where_clause=WHERE, snap_tol=0.25)
     print(f"Graph built: |V|={nV}, |E|={nE}")
     export_graph_to_gdb(arcpy.env.workspace)
 
+    # przykładowe testy: od 1 do nV (pierwszy i ostatni węzeł w kolejności ID)
     dijkstra(1, nV)
     a_star_length(1, nV)
+    a_star_speed(1, nV)
