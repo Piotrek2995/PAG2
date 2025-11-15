@@ -5,7 +5,7 @@ from typing import Dict, List, Tuple, Set, Optional
 import math
 
 # Konfiguracja
-arcpy.env.workspace = r"C:\Users\szymo\OneDrive\Dokumenty\ArcGIS\Projects\PAG1\PAG1.gdb"
+arcpy.env.workspace = r"C:\Users\piotr\Documents\ArcGIS\Projects\Projekt1_PAG2\Projekt1_PAG2.gdb"
 FC_ROADS = "skjz_kopia2"
 WHERE = None
 
