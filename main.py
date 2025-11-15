@@ -4,9 +4,9 @@ from collections import defaultdict
 from typing import Dict, List, Tuple, Set, Optional
 import math
 
-# ─── Konfiguracja ──────────────────────────────────────────────────────────────
-arcpy.env.workspace = r"C:\Users\piotr\Documents\ArcGIS\Projects\Projekt1_PAG2\Projekt1_PAG2.gdb"  # ustaw własną ścieżkę
-FC_ROADS = "skjzPAG2"   # ustaw własną warstwę
+# Konfiguracja
+arcpy.env.workspace = r"C:\Users\szymo\OneDrive\Dokumenty\ArcGIS\Projects\PAG1\PAG1.gdb"
+FC_ROADS = "skjz_kopia2"
 WHERE = None
 
 FIELD_OID    = "OBJECTID"
@@ -14,14 +14,14 @@ FIELD_SHAPE  = "SHAPE@"
 FIELD_CLASS  = "KLASA_DROG"
 FIELD_DIR_OPT = "kierunkowosc"
 
-# Domyślne prędkości (km/h) dla A* po czasie
+# Domyślne prędkości
 SPEED_KPH = {"A":140, "S":120, "GP":90, "G":50, "Z":50, "L":50, "D":30, "I":10}
 
-# ─── Model grafu ───────────────────────────────────────────────────────────────
+# Model grafu
 vertices: Dict[int, Dict] = {}
 edges: Dict[int, Dict] = {}
 
-# ─── Funkcje pomocnicze ───────────────────────────────────────────────────────
+# Funkcje pomocnicze
 def _map_klasa_bdot(klasa_txt: Optional[str]) -> str:
     if not klasa_txt:
         return "G"
@@ -49,11 +49,11 @@ def _mps(kph: float) -> float:
 
 VMAX_MPS = _mps(max(SPEED_KPH.values()))
 
-# ─── Budowa grafu ──────────────────────────────────────────────────────────────
+# Budowa grafu
 def build_graph_from_fc(
     fc: str,
     where_clause: Optional[str] = WHERE,
-    snap_tol: float = 0.25  # tolerancja 0.25 m
+    snap_tol: float = 0.25
 ) -> Tuple[int, int]:
 
     vertex_ids_by_snap: Dict[Tuple[int, int], int] = {}
@@ -80,12 +80,11 @@ def build_graph_from_fc(
                 continue
 
             x1, y1 = first_pt.X, first_pt.Y
-            x2, y2 = last_pt.X,  last_pt.Y
+            x2, y2 = last_pt.X, last_pt.Y
             length_m = float(geom.length)
             klasa_code = _map_klasa_bdot(klasa_txt)
             kier = int(kier) if kier is not None else 0
 
-            # węzły z kwantyzacją
             k1 = _snap_key(x1, y1, snap_tol)
             k2 = _snap_key(x2, y2, snap_tol)
 
@@ -130,14 +129,14 @@ def build_graph_from_fc(
 
     return len(vertices), len(edges)
 
-# ─── Kierunek (bezpiecznik) ───────────────────────────────────────────────────
+# Kierunek
 def czy_dobry_kierunek(direction: int, id_from: int, id_to: int, current_vertex_id: int) -> bool:
     if direction == 3: return False
     if direction == 1: return current_vertex_id == id_from
     if direction == 2: return current_vertex_id == id_to
     return True
 
-# ─── Rekonstrukcja ścieżki ────────────────────────────────────────────────────
+# Rekonstrukcja ścieżki
 def reconstruct_path(predecessors, edge_to_vertex, start, goal):
     path_nodes, path_edges, cur = [], [], goal
     while cur is not None:
@@ -148,7 +147,7 @@ def reconstruct_path(predecessors, edge_to_vertex, start, goal):
     if not path_nodes or path_nodes[0] != start: return [], []
     return path_nodes, path_edges
 
-# ─── Dijkstra (po długości) ───────────────────────────────────────────────────
+# Dijkstra
 def dijkstra(start_vertex_id: int, end_vertex_id: int) -> List[int]:
     INF = float("inf")
     dist, pred = defaultdict(lambda: INF), defaultdict(lambda: None)
@@ -169,12 +168,11 @@ def dijkstra(start_vertex_id: int, end_vertex_id: int) -> List[int]:
     if dist[end_vertex_id] == INF:
         print("No path found."); return []
     nodes, eids = reconstruct_path(pred, edge_to_vertex, start_vertex_id, end_vertex_id)
-    print("[Dijkstra] nodes:", " -> ".join(map(str, nodes)))
     print("[Dijkstra] length [m]:", dist[end_vertex_id])
-    print("[Dijkstra] |S|:", len(visited), "|| neighbors checked:", neighbors_checked)
+    # print("[Dijkstra] edges:", eids)
     return eids
 
-# ─── A* (po długości) ─────────────────────────────────────────────────────────
+# A* (po długości)
 def a_star_length(start_vertex_id: int, end_vertex_id: int) -> List[int]:
     INF = float("inf")
     g = defaultdict(lambda: INF)
@@ -184,7 +182,7 @@ def a_star_length(start_vertex_id: int, end_vertex_id: int) -> List[int]:
     edge_to_vertex: Dict[int, int] = {}
 
     g[start_vertex_id] = 0.0
-    pq_len: List[Tuple[float, int]] = []
+    pq_len = []
     heappush(pq_len, (_euclid(start_vertex_id, end_vertex_id), start_vertex_id))
 
     while pq_len:
@@ -195,45 +193,137 @@ def a_star_length(start_vertex_id: int, end_vertex_id: int) -> List[int]:
 
         gu = g[u]
         for eid in vertices[u]["edge_out"]:
-            e = edges[eid]
-            v = e["id_to"]
+            e = edges[eid]; v = e["id_to"]
             neighbors_checked += 1
-            if not czy_dobry_kierunek(e["kier_auto"], e["id_from"], e["id_to"], u):
-                continue
+            if not czy_dobry_kierunek(e["kier_auto"], e["id_from"], e["id_to"], u): continue
             if v in visited: continue
             tentative = gu + e["edge_length_field"]
             if tentative < g[v]:
-                g[v] = tentative
-                pred[v] = u
-                edge_to_vertex[v] = e["id"]
-                f = tentative + _euclid(v, end_vertex_id)
-                heappush(pq_len, (f, v))
+                g[v] = tentative; pred[v] = u; edge_to_vertex[v] = e["id"]
+                heappush(pq_len, (tentative + _euclid(v, end_vertex_id), v))
 
     if g[end_vertex_id] == INF:
         print("No path found.")
         return []
 
     nodes, eids = reconstruct_path(pred, edge_to_vertex, start_vertex_id, end_vertex_id)
-    print("[A* length] nodes:", " -> ".join(map(str, nodes)))
     print("[A* length] length [m]:", g[end_vertex_id])
-    print("[A* length] |S|:", len(visited), " neighbors checked:", neighbors_checked)
+    # print("[A* length] edges:", eids)
     return eids
 
-# ─── A* (po prędkości/czasie) ────────────────────────────────────────────────
+# A* (po czasie)
 def a_star_speed(start_vertex_id: int, end_vertex_id: int) -> List[int]:
-    """
-    Minimalizuje czas przejazdu: cost(edge) = length / speed(klasa_drogi).
-    Heurystyka: Euclid / VMAX_MPS (admissible i consistent) => zachowuje optymalność.
-    """
     INF = float("inf")
-    g_time = defaultdict(lambda: INF)   # sekundy
+    g_time = defaultdict(lambda: INF)
     pred = defaultdict(lambda: None)
     visited: Set[int] = set()
     neighbors_checked = 0
     edge_to_vertex: Dict[int, int] = {}
 
     g_time[start_vertex_id] = 0.0
-    pq: List[Tuple[float, int]] = []
+    pq = []
+    heappush(pq, (_euclid(start_vertex_id, end_vertex_id) / VMAX_MPS, start_vertex_id))
+
+    while pq:
+        _, u = heappop(pq)
+        if u in visited: continue
+        visited.add(u)
+        if u == end_vertex_id: break
+
+        gu = g_time[u]
+        for eid in vertices[u]["edge_out"]:
+            e = edges[eid]; v = e["id_to"]
+            neighbors_checked += 1
+            if not czy_dobry_kierunek(e["kier_auto"], e["id_from"], e["id_to"], u): continue
+            if v in visited: continue
+
+            cls = e.get("klasa_drogi", "G")
+            v_mps = _mps(SPEED_KPH.get(cls, SPEED_KPH["G"]))
+            if v_mps <= 0:
+                continue
+            travel = e["edge_length_field"] / v_mps
+            tentative = gu + travel
+
+            if tentative < g_time[v]:
+                g_time[v] = tentative
+                pred[v] = u
+                edge_to_vertex[v] = e["id"]
+                f = tentative + _euclid(v, end_vertex_id) / VMAX_MPS
+                heappush(pq, (f, v))
+
+    if g_time[end_vertex_id] == INF:
+        print("No path found.")
+        return []
+
+    nodes, eids = reconstruct_path(pred, edge_to_vertex, start_vertex_id, end_vertex_id)
+    total_len = sum(edges[eid]["edge_length_field"] for eid in eids)
+    print("[A* speed] time [s]:", g_time[end_vertex_id])
+    # print("[A* speed] edges:", eids)
+    return eids
+
+# Trasa alternatywna
+def alternative_route(start_vertex_id: int, end_vertex_id: int, penalty_factor: float = 1.2):
+    """
+    Wyznacza trasę alternatywną metodą kary kosztowej:
+    1. Znajduje najszybszą trasę A*.
+    2. Mnoży koszt każdej krawędzi tej trasy przez penalty_factor.
+    3. Oblicza trasę ponownie -> otrzymujemy alternatywę.
+    """
+
+    print("\n1. Szukanie trasy podstawowej...")
+    primary_edges = a_star_speed(start_vertex_id, end_vertex_id)
+
+    if not primary_edges:
+        print("Brak trasy podstawowej.")
+        return []
+
+    # koszt podstawowy
+    base_cost = sum(edges[eid]["edge_length_field"] /
+                    _mps(SPEED_KPH.get(edges[eid]["klasa_drogi"], 50))
+                    for eid in primary_edges)
+
+    print(f"Koszt podstawowy (czas): {base_cost:.2f} s")
+    target_min_cost = base_cost * penalty_factor
+    print(f"2. Koszt alternatywy (czas): {target_min_cost:.2f} s")
+
+    # 1) dodajemy karę czasową na krawędzie trasy pierwotnej
+    penalty_backup = {}
+
+    for eid in primary_edges:
+        e = edges[eid]
+        cls = e["klasa_drogi"]
+        v_mps = _mps(SPEED_KPH.get(cls, 50))
+        travel = e["edge_length_field"] / v_mps
+
+        penalty_backup[eid] = travel
+        penalty_travel = travel * penalty_factor
+
+        # zapisujemy zmodyfikowany czas
+        edges[eid]["__penalty_cost"] = penalty_travel
+
+    # 2) wykonujemy A* z wykorzystaniem zmodyfikowanych kosztów
+    print("3. Obliczanie trasy alternatywnej...")
+
+    alt_edges = a_star_speed_with_penalty(start_vertex_id, end_vertex_id)
+
+    # 3) przywracamy oryginalne koszty
+    for eid in primary_edges:
+        if "__penalty_cost" in edges[eid]:
+            del edges[eid]["__penalty_cost"]
+
+    print("Trasa alternatywna:", alt_edges)
+    return alt_edges
+
+# Zmodyfikowana wersja A* obsługująca kary
+def a_star_speed_with_penalty(start_vertex_id: int, end_vertex_id: int):
+    INF = float("inf")
+    g_time = defaultdict(lambda: INF)
+    pred = defaultdict(lambda: None)
+    visited: Set[int] = set()
+    edge_to_vertex: Dict[int, int] = {}
+
+    g_time[start_vertex_id] = 0.0
+    pq = []
     heappush(pq, (_euclid(start_vertex_id, end_vertex_id) / VMAX_MPS, start_vertex_id))
 
     while pq:
@@ -246,40 +336,32 @@ def a_star_speed(start_vertex_id: int, end_vertex_id: int) -> List[int]:
         for eid in vertices[u]["edge_out"]:
             e = edges[eid]
             v = e["id_to"]
-            neighbors_checked += 1
-            if not czy_dobry_kierunek(e["kier_auto"], e["id_from"], e["id_to"], u):
-                continue
+            if not czy_dobry_kierunek(e["kier_auto"], e["id_from"], e["id_to"], u): continue
             if v in visited: continue
 
-            # czas na krawędzi
-            cls = e.get("klasa_drogi", "G")
-            v_mps = _mps(SPEED_KPH.get(cls, SPEED_KPH["G"]))
-            if v_mps <= 0:
-                continue
-            travel = e["edge_length_field"] / v_mps  # sekundy
+            # koszt standardowy
+            cls = e["klasa_drogi"]
+            v_mps = _mps(SPEED_KPH.get(cls, 50))
+            base_time = e["edge_length_field"] / v_mps
+
+            # jeśli istnieje kara – użyj jej
+            travel = e.get("__penalty_cost", base_time)
 
             tentative = gu + travel
             if tentative < g_time[v]:
                 g_time[v] = tentative
                 pred[v] = u
-                edge_to_vertex[v] = e["id"]
-                h = _euclid(v, end_vertex_id) / VMAX_MPS
-                f = tentative + h
-                heappush(pq, (f, v))
+                edge_to_vertex[v] = eid
+                heappush(pq, (tentative + _euclid(v, end_vertex_id) / VMAX_MPS, v))
 
     if g_time[end_vertex_id] == INF:
-        print("No path found.")
+        print("Nie udało się znaleźć trasy alternatywnej.")
         return []
 
-    nodes, eids = reconstruct_path(pred, edge_to_vertex, start_vertex_id, end_vertex_id)
-    total_len = sum(edges[eid]["edge_length_field"] for eid in eids)
-    print("[A* speed] nodes:", " -> ".join(map(str, nodes)))
-    print("[A* speed] time [s]:", g_time[end_vertex_id])
-    print("[A* speed] length [m]:", total_len)
-    print("[A* speed] |S|:", len(visited), " neighbors checked:", neighbors_checked)
+    _, eids = reconstruct_path(pred, edge_to_vertex, start_vertex_id, end_vertex_id)
     return eids
 
-# ─── Eksport grafu do GDB ─────────────────────────────────────────────────────
+# Eksport grafu
 def export_graph_to_gdb(gdb_path: str, nodes_name: str = "nodes_out", edges_name: str = "edges_out"):
     sr = arcpy.Describe(FC_ROADS).spatialReference
     nodes_fc = f"{gdb_path}\\{nodes_name}"
@@ -294,7 +376,6 @@ def export_graph_to_gdb(gdb_path: str, nodes_name: str = "nodes_out", edges_name
     with arcpy.da.InsertCursor(nodes_fc, ["SHAPE@XY", "node_id"]) as icur:
         for vid, v in vertices.items():
             icur.insertRow(((v["x"], v["y"]), vid))
-    print(f"[EXPORT] Zapisano {len(vertices)} węzłów do {nodes_fc}")
 
     arcpy.management.CreateFeatureclass(gdb_path, edges_name, "POLYLINE", spatial_reference=sr)
     arcpy.management.AddField(edges_fc, "edge_id",     "LONG")
@@ -310,22 +391,28 @@ def export_graph_to_gdb(gdb_path: str, nodes_name: str = "nodes_out", edges_name
         ["SHAPE@", "edge_id", "id_from", "id_to", "length_m", "klasa", "kier", "jezdnia_oid"]
     ) as icur:
         for eid, e in edges.items():
-            u = vertices[e["id_from"]]; v = vertices[e["id_to"]]
+            u = vertices[e["id_from"]]
+            v = vertices[e["id_to"]]
             arr = arcpy.Array([arcpy.Point(u["x"], u["y"]), arcpy.Point(v["x"], v["y"])])
             poly = arcpy.Polyline(arr, sr)
             icur.insertRow((
                 poly, eid, e["id_from"], e["id_to"],
-                e["edge_length_field"], e["klasa_drogi"], e["kier_auto"], e.get("jezdnia_oid", None)
+                e["edge_length_field"], e["klasa_drogi"], e["kier_auto"], e["jezdnia_oid"]
             ))
-    print(f"[EXPORT] Zapisano {len(edges)} krawędzi do {edges_fc}")
 
-# ─── main ─────────────────────────────────────────────────────────────────────
+# main
 if __name__ == "__main__":
     nV, nE = build_graph_from_fc(FC_ROADS, where_clause=WHERE, snap_tol=0.25)
     print(f"Graph built: |V|={nV}, |E|={nE}")
+
     export_graph_to_gdb(arcpy.env.workspace)
 
-    # przykładowe testy: od 1 do nV (pierwszy i ostatni węzeł w kolejności ID)
-    dijkstra(1, nV)
-    a_star_length(1, nV)
-    a_star_speed(1, nV)
+    start = 1
+    goal = nV
+
+    dijkstra(start, goal)
+    a_star_length(start, goal)
+    a_star_speed(start, goal)
+
+    print("\n--- TRASA ALTERNATYWNA ---")
+    alternative_route(start, goal, penalty_factor=1.2)
